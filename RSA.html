@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>RSA Kalkulyator (bir nechta xabar)</title>
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#0f172a;--card:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;
+  --accent:#38bdf8;--green:#4ade80;--red:#f87171;--yellow:#fbbf24;--btn:#0284c7;--btn-h:#0369a1;--input-border:#475569;
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f1f5f9;--card:#ffffff;--border:#cbd5e1;--text:#0f172a;--muted:#475569;
+    --accent:#0369a1;--green:#15803d;--red:#b91c1c;--yellow:#b45309;--btn:#0284c7;--btn-h:#0369a1;--input-border:#94a3b8;
+    color-scheme:light;
+  }
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:var(--bg);color:var(--text);max-width:900px;margin:0 auto;padding:20px}
+h1{text-align:center;color:var(--accent);font-size:1.5rem}
+.card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:20px;margin-bottom:20px}
+.inputs{display:grid;grid-template-columns:repeat(3,1fr);gap:15px;margin-bottom:15px}
+.full{grid-column:1/-1}
+@media (max-width:600px){.inputs{grid-template-columns:1fr}}
+label{display:block;margin-bottom:6px;font-weight:bold;color:var(--muted);font-size:14px}
+input{width:100%;padding:10px;border-radius:6px;border:1px solid var(--input-border);background:var(--bg);color:var(--text);font-size:16px;box-sizing:border-box}
+small{color:var(--muted)}
+button{width:100%;padding:12px;background:var(--btn);color:#fff;border:none;border-radius:6px;font-size:16px;font-weight:bold;cursor:pointer}
+button:hover{background:var(--btn-h)}
+.step-title{color:var(--accent);border-bottom:1px solid var(--border);padding-bottom:8px;margin-top:0}
+.hl{color:var(--green);font-weight:bold}
+.secret{color:var(--red);font-weight:bold}
+.cipher{color:var(--yellow);font-weight:bold}
+.formula{background:var(--bg);padding:12px 15px;border-left:4px solid var(--accent);font-family:monospace;font-size:15px;margin:10px 0;line-height:1.7;overflow-x:auto}
+.error{color:var(--red);font-weight:bold}
+.skipped{color:var(--muted)}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-family:monospace;font-size:14px}
+th,td{border:1px solid var(--border);padding:8px 10px;text-align:center}
+th{background:var(--bg);color:var(--accent)}
+tr.used{background:rgba(16,185,129,.14)}
+details{border:1px solid var(--border);border-radius:8px;margin:10px 0;padding:10px 14px}
+summary{cursor:pointer;font-weight:bold;color:var(--accent)}
+.ok{color:var(--green);font-weight:bold}
+.bad{color:var(--red);font-weight:bold}
+</style>
+</head>
+<body>
+<h1>🔐 RSA: shifrlash va deshifrlash</h1>
+
+<div class="card">
+  <h3 class="step-title">⚙️ Parametrlarni kiriting</h3>
+  <div class="inputs">
+    <div><label for="p">1-tub son (p)</label><input id="p" inputmode="numeric" value="11"></div>
+    <div><label for="q">2-tub son (q)</label><input id="q" inputmode="numeric" value="19"></div>
+    <div><label for="e">Ochiq kalit (e)</label><input id="e" inputmode="numeric" value="7"></div>
+    <div class="full"><label for="k">k (ixtiyoriy): d = (1 + k·φ) ÷ e</label><input id="k" inputmode="numeric" placeholder="bo’sh qoldirsangiz, k avtomatik topiladi" value=""></div>
+    <div class="full">
+      <label for="m">Xabarlar (M) — bir nechtasini vergul, probel yoki nuqtali vergul bilan ajrating</label>
+      <input id="m" value="29, 5, 100, 150">
+      <small>Son yoki harf kiritish mumkin: 29, 5, 100 yoki HELLO (A=1, B=2, …, Z=26; 26 dan katta sonlar mod 26 bilan harfga moslanadi). Har bir M 1 dan n − 1 gacha bo’lishi kerak.</small>
+    </div>
+  </div>
+  <button id="go">Hisoblash</button>
+</div>
+
+<div id="output"></div>
+
+<script>
+function isPrime(n){
+  if(n<2n) return false;
+  if(n%2n===0n) return n===2n;
+  for(let i=3n;i*i<=n;i+=2n){ if(n%i===0n) return false; }
+  return true;
+}
+function gcd(a,b){ while(b){ [a,b]=[b,a%b]; } return a; }
+// Kengaytirilgan Evklid algoritmi: a*x ≡ 1 (mod m)
+function modInverse(a,m){
+  let [r0,r1]=[a%m,m], [s0,s1]=[1n,0n];
+  while(r1!==0n){
+    const q=r0/r1;
+    [r0,r1]=[r1,r0-q*r1];
+    [s0,s1]=[s1,s0-q*s1];
+  }
+  if(r0!==1n) return null;
+  return ((s0%m)+m)%m;
+}
+
+function modExpDetailed(base,exp,mod,varName){
+  let rows="", powers=[], result=1n;
+  let cur=base%mod, prev=null, p2=1n, e=exp, step=1;
+  while(e>0n){
+    const bit=e%2n;
+    const calc = step===1
+      ? `${base}<sup>1</sup> mod ${mod} = <b>${cur}</b>`
+      : `${prev}<sup>2</sup> mod ${mod} = ${prev*prev} mod ${mod} = <b>${cur}</b>`;
+    if(bit===1n){
+      powers.push(p2);
+      const before=result;
+      result=(result*cur)%mod;
+      rows+=`<tr class="used"><td>${step}</td><td><b>${base}<sup>${p2}</sup></b></td><td>1 (✅ kerak)</td><td>${calc}</td><td>(${before} × ${cur}) mod ${mod} = <b class="hl">${result}</b></td></tr>`;
+    } else {
+      rows+=`<tr class="skipped"><td>${step}</td><td>${base}<sup>${p2}</sup></td><td>0 (⏭️ o’tkaziladi)</td><td>${calc}</td><td>O’zgarmaydi (${result})</td></tr>`;
+    }
+    prev=cur;
+    cur=(cur*cur)%mod;
+    p2*=2n; e/=2n; step++;
+  }
+  const html=`
+    <div><b>1) Daraja (${exp}) ikkilik tizimda:</b> ${exp} = (${exp.toString(2)})<sub>2</sub> = <span class="hl">${powers.slice().reverse().join(" + ")}</span></div>
+    <div style="margin-top:10px"><b>2) Kvadratga oshirish jadvali:</b></div>
+    <div class="scroll"><table><thead><tr><th>Qadam</th><th>Daraja</th><th>Bit</th><th>Kvadratga oshirish (mod ${mod})</th><th>Yig’indi ko’paytma (mod ${mod})</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div><b>3) Natija:</b> <span class="hl" style="font-size:17px">${varName} = ${result}</span></div>`;
+  return {value:result, html};
+}
+
+// Ingliz alifbosi: A=1, B=2, ..., Z=26. 26 dan katta sonlar mod 26 bilan moslanadi (qoldiq 0 bo’lsa Z)
+function L(x){
+  let r=Number(x%26n); if(r===0) r=26;
+  const ch=String.fromCharCode(64+r);
+  return x>26n ? `${x} mod 26 = ${r} → ${ch}` : ch;
+}
+
+// d ni topish: k usuli va kengaytirilgan Evklid usuli
+function dHtml(e,phi,d){
+  const k=(d*e-1n)/phi;
+  let kTable="";
+  if(e<=60n){
+    let rows="";
+    for(let kk=1n;kk<e;kk++){
+      const v=1n+kk*phi, ok=v%e===0n;
+      rows+=`<tr class="${ok?"used":"skipped"}"><td>${kk}</td><td>1 + ${kk} × ${phi} = ${v}</td><td>${v%e}</td><td>${ok?`${v} ÷ ${e} = ${v/e} ✅`:"❌ bo’linmaydi"}</td></tr>`;
+      if(ok) break;
+    }
+    kTable=`<div class="scroll"><table><thead><tr><th>k</th><th>1 + k·φ(n)</th><th>mod ${e}</th><th>d = (1 + k·φ) ÷ e</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  } else {
+    kTable=`<p class="skipped">e katta bo’lgani uchun k ni sinab ko’rish jadvali ko’rsatilmadi, k Evklid usulidan topiladi.</p>`;
+  }
+  let r0=phi, r1=e, t0=0n, t1=1n, divs="";
+  let rows=`<tr><td>—</td><td>${r0}</td><td>${t0}</td></tr><tr><td>—</td><td>${r1}</td><td>${t1}</td></tr>`;
+  while(r1!==0n){
+    const q=r0/r1, r2=r0-q*r1, t2=t0-q*t1;
+    divs+=`${r0} = ${q} × ${r1} + ${r2}<br>`;
+    if(r2!==0n) rows+=`<tr><td>${q}</td><td>${r2}</td><td>${t2}</td></tr>`;
+    [r0,r1]=[r1,r2]; [t0,t1]=[t1,t2];
+  }
+  return `
+    <div class="card">
+      <h3 class="step-title">🧩 k nima va d qanday topiladi?</h3>
+      <p><b>d</b> ning sharti: d × e ≡ 1 (mod φ(n)). Buni tenglama ko’rinishida yozamiz:</p>
+      <div class="formula">d × e = 1 + <b>k</b> × φ(n) &nbsp;→&nbsp; d = (1 + k × ${phi}) ÷ ${e}</div>
+      <p>Bu yerda <b>k</b> — butun son (“nechta marta φ(n) qo’shildi” degani): 1 + k·φ(n) soni e ga qoldiqsiz bo’linadigan eng kichik k ni topamiz.</p>
+
+      <p><b>1-usul (sinab ko’rish, oson):</b> k = 1, 2, 3, … qiymatlarini qo’yamiz.</p>
+      ${kTable}
+
+      <p><b>2-usul (kengaytirilgan Evklid algoritmi):</b></p>
+      <div class="formula">${divs}EKUB(${phi}, ${e}) = ${r0}</div>
+      <p>Jadval (r = φ·x + e·t ko’rinishida, bizga t kerak):</p>
+      <div class="scroll"><table><thead><tr><th>q</th><th>r</th><th>t</th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="formula">Oxirgi t = ${t0} → d = ${t0} mod ${phi} = <span class="secret">${((t0%phi)+phi)%phi}</span></div>
+
+      <p><b>Tekshiruv:</b> ${d} × ${e} = ${d*e} = 1 + <span class="hl">${k}</span> × ${phi} → <b>k = <span class="hl">${k}</span></b>, <b>d = <span class="secret">${d}</span></b> ✅</p>
+    </div>`;
+}
+
+function showError(msg){
+  document.getElementById("output").innerHTML=`<div class="card error">Xatolik: ${msg}</div>`;
+}
+
+function parseBig(id){
+  const s=document.getElementById(id).value.trim();
+  return /^\d+$/.test(s) ? BigInt(s) : null;
+}
+
+function run(){
+  const p=parseBig("p"), q=parseBig("q"), e=parseBig("e");
+  if(p===null||q===null) return showError("p va q butun musbat son bo’lishi kerak!");
+  if(e===null) return showError("e butun musbat son bo’lishi kerak!");
+  if(p>10n**12n||q>10n**12n) return showError("p va q juda katta (10<sup>12</sup> dan oshmasin).");
+  if(!isPrime(p)||!isPrime(q)) return showError("p va q tub son bo’lishi shart!");
+  if(p===q) return showError("p va q har xil tub sonlar bo’lishi kerak!");
+
+  const n=p*q, phi=(p-1n)*(q-1n);
+  if(e<=1n||e>=phi||gcd(e,phi)!==1n)
+    return showError(`e = ${e} noto’g’ri! Shartlar: 1 &lt; e &lt; ${phi} va EKUB(e, ${phi}) = 1.`);
+
+  const raw=document.getElementById("m").value.split(/[\s,;]+/).filter(Boolean);
+  const tokens=[];
+  for(const t of raw){
+    if(/^[A-Za-z]+$/.test(t)){ for(const ch of t.toUpperCase()) tokens.push(String(ch.charCodeAt(0)-64)); }
+    else tokens.push(t);
+  }
+  if(!tokens.length) return showError("Kamida bitta xabar (M) kiriting.");
+  const msgs=[];
+  for(const t of tokens){
+    if(!/^\d+$/.test(t)) return showError(`"${t.replace(/</g,"&lt;")}" butun musbat son emas.`);
+    const m=BigInt(t);
+    if(m<1n||m>=n) return showError(`M = ${m} 1 dan katta va n = ${n} dan kichik bo’lishi shart!`);
+    msgs.push(m);
+  }
+
+  const kStr=document.getElementById("k").value.trim();
+  let d;
+  if(kStr!==""){
+    if(!/^\d+$/.test(kStr)) return showError("k butun musbat son bo’lishi kerak (yoki bo’sh qoldiring).");
+    const kk=BigInt(kStr), v=1n+kk*phi;
+    if(v%e!==0n) return showError(`k = ${kk} mos emas: 1 + ${kk} × ${phi} = ${v} soni ${e} ga bo’linmaydi. Boshqa k kiriting yoki bo’sh qoldiring.`);
+    d=v/e;
+  } else {
+    d=modInverse(e,phi);
+    if(d===null) return showError("e uchun teskari element topilmadi.");
+  }
+
+  let details="";
+  msgs.forEach((m,i)=>{
+    const enc=modExpDetailed(m,e,n,"C");
+    const dec=modExpDetailed(enc.value,d,n,"M");
+    const ok=dec.value===m;
+    details+=`
+      <div class="card" style="padding:8px 20px">
+        <div class="formula">✉️ M<sub>${i+1}</sub> = ${m} (${L(m)})<br>🔒 C<sub>${i+1}</sub> = ${m}<sup>${e}</sup> mod ${n} = <span class="cipher">${enc.value} (${L(enc.value)})</span><br>🔓 M<sub>${i+1}</sub> = ${enc.value}<sup>${d}</sup> mod ${n} = <span class="${ok?"ok":"bad"}">${dec.value} (${L(dec.value)}) ${ok?"✅":"❌"}</span></div>
+      </div>`;
+  });
+
+  document.getElementById("output").innerHTML=`
+    <div class="card">
+      <h3 class="step-title">🔑 Kalitlar</h3>
+      <p>n = p × q = ${p} × ${q} = <span class="hl">${n}</span></p>
+      <p>φ(n) = (${p} − 1) × (${q} − 1) = <span class="hl">${phi}</span></p>
+      <p>e = <span class="hl">${e}</span> (EKUB(${e}, ${phi}) = 1 ✅)</p>
+      <p>d = <span class="secret">${d}</span> (chunki ${d} × ${e} ≡ 1 mod ${phi})</p>
+      <div class="formula">🔓 Ochiq kalit: (e = ${e}, n = ${n})<br>🔑 Maxfiy kalit: (d = <span class="secret">${d}</span>, n = ${n})</div>
+    </div>
+    ${dHtml(e,phi,d)}
+    ${details}`;
+}
+
+document.getElementById("go").addEventListener("click",run);
+document.querySelectorAll("input").forEach(el=>el.addEventListener("keydown",ev=>{ if(ev.key==="Enter") run(); }));
+run();
+</script>
+</body>
+</html>
